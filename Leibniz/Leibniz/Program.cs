@@ -37,8 +37,25 @@ namespace IDEAS
 
     }
 
+    public class GGRM_GraphDirection
+    {
+        public static List<GGRM_GraphDirection> allDirections = new List<GGRM_GraphDirection>();
+
+        public bool backwardsTransformation = false;
+        public GGRM_N_Subset requirement, transformation;
+
+        public GGRM_GraphDirection(GGRM_N_Subset req, GGRM_N_Subset transform, bool transformBackwards)
+        {
+            requirement = req;
+            transformation = transform;
+            backwardsTransformation = transformBackwards;
+        }
+    }
+
     public class GGRM_GraphNode
     {
+        public static Dictionary<(BigInteger, BigInteger, BigInteger, BigInteger), bool> transpositionTable = new Dictionary<(BigInteger, BigInteger, BigInteger, BigInteger), bool>();
+
         public static double staticUncertaintyUntil = 0;
         public static GGRM_GraphNode root;
 
@@ -65,6 +82,7 @@ namespace IDEAS
         public void AddChild(GGRM_GraphNodeSubsetTuple subsetTuple, GraphDirection dir)
         {
             GGRM_N_Subset values = subsetTuple.values, originals = subsetTuple.originals, tmp;
+
             GGRM_GraphNode newNode = childNodes[(int)dir] == null ? new() : childNodes[(int)dir];
             GGRM_GraphNodeSubsetTuple newTuple = new(newNode, subsetTuple.rootTupleRef, new(1, 0), new(1, 0));
             switch (dir)
@@ -92,6 +110,17 @@ namespace IDEAS
                     newTuple.values = tmp * values / 2;
                     break;
             }
+
+            (BigInteger, BigInteger, BigInteger, BigInteger) biArray = (newTuple.values.a, newTuple.values.b, newTuple.originals.a, newTuple.originals.b);
+            if (transpositionTable.ContainsKey(biArray))
+            {
+                GGRM.transpositionCount++;
+                //Console.WriteLine("!!!");
+                return;
+            }
+            transpositionTable.Add(biArray, true);
+
+            GGRM.subsetCount++;
             newNode.parent = this;
             newNode.previousGraphDir = dir;
             newNode.subsetTuples.Add(newTuple);
@@ -347,7 +376,7 @@ namespace IDEAS
     {
         public static void Main(string[] args)
         {
-            const int MAX_DEPTH = 12;
+            const int MAX_DEPTH = 10;
 
             Stopwatch sw = Stopwatch.StartNew();
 
@@ -374,6 +403,9 @@ namespace IDEAS
 
                     //if (i == furthestDepth) Console.WriteLine(beginNode);
 
+                    subsetCount = 0;
+                    transpositionCount = 0;
+                    GGRM_GraphNode.transpositionTable.Clear();
                     RecursiveTreeGeneration(i, beginNode);
 
                     foreach (GGRM_GraphNodeSubsetTuple rule in allNewRules) beginNode.ApplyNewRule(rule);
@@ -391,6 +423,8 @@ namespace IDEAS
                         $"uncertaintyThreshold = {GGRM_GraphNode.staticUncertaintyUntil}, " +
                         $"rootSubsetCount = {beginNode.subsetTuples.Count}, " +
                         $"nodeCount = {nodeCount}, " +
+                        $"transposCount = {transpositionCount}, " +
+                        $"subsetCount = {subsetCount}, " +
                         $"remainingNaturalsSize = {totalPercentage}):");
                         //Console.WriteLine(beginNode);
                         Console.WriteLine();
@@ -409,6 +443,7 @@ namespace IDEAS
         public static bool cutoffFound = true;
         //private static List<GGRM_N_Subset> remainingPossibilities = new();
         private static long nodeCount = 0;
+        public static long transpositionCount = 0, subsetCount = 0;
         public static List<GGRM_GraphNodeSubsetTuple> allNewRules = new();
 
         public static void RecursiveTreeGeneration(int depth, GGRM_GraphNode node)

@@ -1,7 +1,9 @@
 ﻿using System.Diagnostics;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Text;
 using CUSTOM_LOGGING;
+using Microsoft.VisualBasic;
 
 namespace IDEAS
 {
@@ -31,6 +33,7 @@ namespace IDEAS
             nodeRef = node;
             allOriginalLinks[rootTupleRef].Add(this);
         }
+
         public override string ToString()
         {
             return $"({originals}->{values})";
@@ -40,26 +43,92 @@ namespace IDEAS
 
     public class GGRM_GraphDirection
     {
-        public static GGRM_GraphDirection None = new(new(0,0), new(0,0), false);
+        public static GGRM_GraphDirection None = new(new(1,0), new(1,0));
         public static List<GGRM_GraphDirection> allDirections = new List<GGRM_GraphDirection>();
 
-        public bool backwardsTransformation = false;
         public GGRM_N_Subset requirement, transformation;
+        public double sortingIndicator = 0;
 
-        public GGRM_GraphDirection(GGRM_N_Subset req, GGRM_N_Subset transform, bool transformBackwards)
+        public BigInteger t1, t2, t3, t4;
+
+        public GGRM_GraphDirection(GGRM_N_Subset req, GGRM_N_Subset transform)
         {
             requirement = req;
             transformation = transform;
-            backwardsTransformation = transformBackwards;
+
+            BigInteger tggt = BigInteger.GreatestCommonDivisor(requirement.a, transform.a);
+            t1 = requirement.b;
+            t2 = requirement.a / tggt;
+            t3 = transform.a / tggt;
+            t4 = transform.b;
+            sortingIndicator = (double)t3 / (double)t2;
         }
+
+        public GGRM_N_Subset Transform(GGRM_N_Subset set)
+        {
+            return (set - t1) / t2 * t3 + t4;
+        }
+
+        public static void TryAddNewDirection(GGRM_GraphDirection newDir)
+        {
+            // 0) No‐op if req == transform
+            if (newDir.requirement == newDir.transformation)
+                return;
+
+            // 1) Dedup check
+            foreach (var dir in allDirections)
+            {
+                var tmpReq = dir.requirement & newDir.requirement;
+                //if (newDir.requirement == tmpReq) return;
+                if (tmpReq.a != 0 && dir.Transform(newDir.requirement) == newDir.transformation)
+                {
+                    return;
+                }
+            }
+
+            // 2) Comparer by sortingIndicator ascending
+            var comparer = Comparer<GGRM_GraphDirection>.Create((x, y) =>
+                x.sortingIndicator.CompareTo(y.sortingIndicator)
+            );
+
+            // 3) Binary‐search + insert
+            int idx = allDirections.BinarySearch(newDir, comparer);
+            if (idx < 0) idx = ~idx;
+            allDirections.Insert(idx, newDir);
+        }
+
 
         public bool IsOpposite(GGRM_GraphDirection potOpposite) //Das mit dem Requirement ist aktuell n bissl unschön, aber naja
         {
-            return potOpposite.transformation.a == transformation.a &&
-                   potOpposite.transformation.b == transformation.b &&
-                   potOpposite.requirement.a == requirement.a &&
-                   potOpposite.requirement.b == requirement.b &&
-                   backwardsTransformation != potOpposite.backwardsTransformation;
+            return potOpposite.transformation.a == requirement.a &&
+                   potOpposite.transformation.b == requirement.b &&
+                   potOpposite.requirement.a == transformation.a &&
+                   potOpposite.requirement.b == transformation.b;
+        }
+
+        /// <summary>
+        /// Prints all directions in the current allDirections list,
+        /// in their stored (i.e. sorted-by-transformation.a) order.
+        /// </summary>
+        public static void PrintAllDirections()
+        {
+            if (allDirections.Count == 0)
+            {
+                Logger.Log("No graph directions have been added.");
+                return;
+            }
+
+            Logger.Log("Index |    Requirement    |    Transformation    ");
+            Logger.Log("-------------------------------------------------");
+
+            for (int i = 0; i < allDirections.Count; i++)
+            {
+                var dir = allDirections[i];
+                // assuming GGRM_N_Subset overrides ToString() to something sensible
+                Logger.Log(
+                    $"{i,5} | {dir.requirement,-17} | {dir.transformation,-19} |{dir.t1}.{dir.t2}.{dir.t3}.{dir.t4}"
+                );
+            }
         }
     }
 
@@ -103,8 +172,17 @@ namespace IDEAS
             if (tmp.a == 0) return;
 
             newTuple.originals = tmp * originals;
-            newTuple.values = dir.backwardsTransformation ? ((tmp * values - dir.transformation.b) / dir.transformation.a) : (tmp * values * dir.transformation.a + dir.transformation.b);
 
+            //Logger.Log($"{dir.requirement} ---> {newTuple.originals}");
+
+            //newTuple.values = dir.backwardsTransformation ? ((tmp * values - dir.transformation.b) / dir.transformation.a) : (tmp * values * dir.transformation.a + dir.transformation.b);
+            newTuple.values = dir.Transform(tmp * values);
+
+            BigInteger tmpPrevB = newTuple.values.b;
+            newTuple.values.b = BigInteger.Abs(newTuple.values.b % newTuple.values.a);
+            double tmpDiff = (double)newTuple.values.b - (double)tmpPrevB;
+
+            if (tmpDiff > staticUncertaintyUntil) staticUncertaintyUntil = tmpDiff;
 
             //Logger.Log(dir.requirement + " | " + tmp + " | " + dir.transformation + "|" + newTuple.values);
 
@@ -170,6 +248,11 @@ namespace IDEAS
 
             foreach (GGRM_GraphNodeSubsetTuple subsetTuple in subsetTuples)
             {
+                BigInteger tmpPrevB = subsetTuple.originals.b;
+                while (subsetTuple.originals.b < 0) subsetTuple.originals.b += subsetTuple.originals.a;
+                double tmpDiff = (double)subsetTuple.originals.b - (double)tmpPrevB;
+                if (tmpDiff > staticUncertaintyUntil) staticUncertaintyUntil = tmpDiff;
+
                 if (subsetTuple.values.a < subsetTuple.originals.a)
                 {
                     bool b = false;
@@ -180,10 +263,18 @@ namespace IDEAS
                     if (!b)
                     {
                         Logger.Log("NEW RULE: " + subsetTuple.originals + "");
+                        //Logger.Log(subsetTuple.rootTupleRef.nodeRef);
 
                         foundCutoff = true;
                         GGRM.allNewRules.Add(subsetTuple);
                     }
+                }
+                else
+                {
+                    // New Dir
+                    //Logger.Log(subsetTuple);
+
+                    GGRM.allNewDirections.Add(new(subsetTuple.values, subsetTuple.originals));
                 }
             }
 
@@ -319,9 +410,9 @@ namespace IDEAS
             if (incomingDir != GGRM_GraphDirection.None)
             {
                 // if backwardsTransformation, we’re effectively doing “/a”, else “*a”
-                var op = incomingDir.backwardsTransformation ? "/" : "*";
-                var factor = incomingDir.transformation.a;
-                sb.Append($"[{op}{factor}] ");
+                string factor = incomingDir.sortingIndicator.ToString();
+                if (factor.Length > 4) factor = factor.Substring(0, 4);
+                sb.Append($"[*{factor}] ");
             }
 
             // 3) list out this node’s subsetTuples via their own ToString()
@@ -444,56 +535,67 @@ namespace IDEAS
 
     public static class GGRM
     {
+        public static void CreateRootNode()
+        {
+            GGRM_GraphNode.root = new();
+            GGRM_GraphNode.root.subsetTuples = new List<GGRM_GraphNodeSubsetTuple>() { new GGRM_GraphNodeSubsetTuple(GGRM_GraphNode.root, new(1, 0)) };
+        }
+
+        public static void ResetTreeStatics()
+        {
+            allNewDirections.Clear();
+            nodeCount = 0;
+            subsetCount = 0;
+            transpositionCount = 0;
+            GGRM_N_Subset.ModChecks = 0;
+            GGRM_GraphNode.transpositionTable.Clear();
+        }
+
         public static void Main(string[] args)
         {
-            GGRM_GraphDirection.allDirections.AddRange(new GGRM_GraphDirection[] {
-                new GGRM_GraphDirection(new(1, 0), new(2, 0), false),
+            /*GGRM_GraphDirection.allDirections.AddRange(new GGRM_GraphDirection[] {
+                new GGRM_GraphDirection(new(6, 4), new(3, 1), true),
                 new GGRM_GraphDirection(new(2, 0), new(2, 0), true),
+                new GGRM_GraphDirection(new(1, 0), new(2, 0), false),
                 new GGRM_GraphDirection(new(2, 1), new(3, 1), false),
-                new GGRM_GraphDirection(new(6, 4), new(3, 1), true)
-                });
+                });*/
 
+            GGRM_GraphDirection[] BeginningArray = { new(new(6, 4), new(2, 1)), new(new(2, 0), new(1, 0)), new(new(1, 0), new(2, 0)), new(new(2, 1), new(6, 4)), };
+            foreach (GGRM_GraphDirection dir in BeginningArray) GGRM_GraphDirection.TryAddNewDirection(dir);
             Logger.ClearLog();
-            const int MAX_DEPTH = 10; //Rekord: 17!
-
+            const int MAX_DEPTH = 4, DIR_DEPTH = 9; //PB Timeline: 10*1, 16*1, 17*1, 18*1, 3*9, 4*9!
             Stopwatch sw = Stopwatch.StartNew();
+
+
+            CreateRootNode();
+            ResetTreeStatics();
+            FullRecursiveTreeGeneration(DIR_DEPTH, GGRM_GraphNode.root, true);
+            foreach (GGRM_GraphDirection dir in allNewDirections) GGRM_GraphDirection.TryAddNewDirection(dir);
+            GGRM_GraphDirection.PrintAllDirections();
+
+            //return;
 
             int iteration = 0, furthestDepth = 1;
             cutoffFound = true;
-
             while (cutoffFound)
             {
-
                 cutoffFound = false;
-                for (int i = furthestDepth; i <= MAX_DEPTH; i++)
+                for (int i = furthestDepth; i <= MAX_DEPTH; i++) //i = furthest depth
                 {
-                    //Logger.Log(i);
-
-                    nodeCount = 0;
-                    //GGRM_GraphNodeSubsetTuple.allOriginalLinks.Clear();
+                    if (iteration == 0) CreateRootNode();
                     GGRM_GraphNode beginNode = GGRM_GraphNode.root;
 
-                    if (iteration == 0)
-                    {
-                        beginNode = GGRM_GraphNode.root = new();
-                        beginNode.subsetTuples = new List<GGRM_GraphNodeSubsetTuple>() { new GGRM_GraphNodeSubsetTuple(beginNode, new(1, 0)) };
-                    }
-
                     //if (i == furthestDepth) Logger.Log(beginNode);
-
                     //foreach (GGRM_GraphNodeSubsetTuple subsetT in beginNode.subsetTuples) Logger.Log(subsetT.originals);
                     //Logger.Log("GRAPHING PROCESS STARTED\n");
 
-                    subsetCount = 0;
-                    transpositionCount = 0;
-                    GGRM_N_Subset.ModChecks = 0;
-                    GGRM_GraphNode.transpositionTable.Clear();
-                    RecursiveTreeGeneration(i, beginNode);
+                    ResetTreeStatics();
+                    RecursiveTreeGeneration(i, beginNode, true);
 
-                    //Logger.Log("RULE APPLY PROCESS STARTED");
                     foreach (GGRM_GraphNodeSubsetTuple rule in allNewRules) beginNode.ApplyNewRule(rule);
                     allNewRules.Clear();
-                    //Logger.Log("RULE APPLY PROCESS ENDED");
+
+                    //foreach (GGRM_GraphDirection dir in allNewDirections) GGRM_GraphDirection.TryAddNewDirection(dir);
 
                     if (furthestDepth < i) furthestDepth = i;
                     if (cutoffFound || MAX_DEPTH == furthestDepth)
@@ -509,9 +611,11 @@ namespace IDEAS
                         $"transposCount = {transpositionCount}, " +
                         $"subsetCount = {subsetCount}, " +
                         $"modChecks = {GGRM_N_Subset.ModChecks}, " +
+                        $"dirCount = {GGRM_GraphDirection.allDirections.Count}, " +
                         $"remainingNaturalsSize = {totalPercentage}):");
-                        Logger.Log(beginNode);
 
+                        //Logger.Log(beginNode);
+                        //GGRM_GraphDirection.PrintAllDirections();
 
                         foreach (GGRM_GraphNodeSubsetTuple subsetT in beginNode.subsetTuples) Logger.Log(subsetT.originals);
 
@@ -535,23 +639,41 @@ namespace IDEAS
         private static long nodeCount = 0;
         public static long transpositionCount = 0, subsetCount = 0;
         public static List<GGRM_GraphNodeSubsetTuple> allNewRules = new();
+        public static List<GGRM_GraphDirection> allNewDirections = new();
 
-        public static void RecursiveTreeGeneration(int depth, GGRM_GraphNode node)
+        public static void RecursiveTreeGeneration(int depth, GGRM_GraphNode node, bool isRoot)
         {
             nodeCount++;
 
             if (node == null) return;
 
-            if (node.CheckForLowerCutoffs()) cutoffFound = true;
+            if (!isRoot && node.CheckForLowerCutoffs()) cutoffFound = true;
 
             if (depth == 0 || cutoffFound) return;
 
-            if (node.CheckForUpperCutoffs(depth)) return;
+            //if (node.CheckForUpperCutoffs(depth)) return;
 
             node.GenerateChildren();
             foreach (GGRM_GraphNode child in node.childNodes.Values)
                 if (!cutoffFound)
-                    RecursiveTreeGeneration(depth - 1, child);
+                    RecursiveTreeGeneration(depth - 1, child, false);
+        }
+
+        public static void FullRecursiveTreeGeneration(int depth, GGRM_GraphNode node, bool isRoot)
+        {
+            nodeCount++;
+
+            if (node == null) return;
+
+            if (!isRoot && node.CheckForLowerCutoffs()) return;
+
+            if (depth == 0) return;
+
+            //if (node.CheckForUpperCutoffs(depth)) return;
+
+            node.GenerateChildren();
+            foreach (GGRM_GraphNode child in node.childNodes.Values)
+                FullRecursiveTreeGeneration(depth - 1, child, false);
         }
     }
 }

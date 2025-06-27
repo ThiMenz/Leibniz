@@ -1,10 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Numerics;
-using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 using System.Text;
 using CUSTOM_LOGGING;
-using Microsoft.VisualBasic;
 
 namespace IDEAS
 {
@@ -263,6 +260,8 @@ namespace IDEAS
 
                     if (!b)
                     {
+                        if (subsetTuple.originals.a > GGRM.MAX_RULE_A) continue;
+
                         Logger.Log("NEW RULE: " + subsetTuple.originals + "");
                         //Logger.Log(subsetTuple.rootTupleRef.nodeRef);
 
@@ -292,7 +291,7 @@ namespace IDEAS
             if (tDiff > staticUncertaintyUntil) staticUncertaintyUntil = tDiff;
 
             newRule.b = newRule.b % newRule.a;
-            List<GGRM_GraphNodeSubsetTuple> newRootSubsets = new();
+            //List<GGRM_GraphNodeSubsetTuple> newRootSubsets = new();
             foreach (GGRM_GraphNodeSubsetTuple rootTuple in root.subsetTuples)
             {
                 //Logger.Log("r>" + rootTuple);
@@ -368,22 +367,25 @@ namespace IDEAS
             GGRM_N_Subset t = rootTuple.originals & newSubset;
 
             bool foundEqualOrPartialSubset = false;
+            /*
             foreach (GGRM_N_Subset g in splits)
             {
                 GGRM_N_Subset gANDt = g & t;
                 if (gANDt == g)
                 {
+                    Console.WriteLine("!!!");
                     foundEqualOrPartialSubset = true;
                     break;
                 }
                 else if (gANDt == t)
                 {
+                    Console.WriteLine("???");
                     splits.Add(t);
                     splits.Remove(g);
                     foundEqualOrPartialSubset = true;
                     break;
                 }
-            }
+            }*/
 
             if (!foundEqualOrPartialSubset)
             {
@@ -554,12 +556,14 @@ namespace IDEAS
             GGRM_GraphNode.transpositionTable.Clear();
         }
 
+        public static BigInteger MAX_RULE_A = 400_000;
+
         public static void Main(string[] args)
         {
             GGRM_GraphDirection[] BeginningArray = { new(new(6, 4), new(2, 1)), new(new(2, 0), new(1, 0)), new(new(1, 0), new(2, 0)), new(new(2, 1), new(6, 4)), };
             foreach (GGRM_GraphDirection dir in BeginningArray) GGRM_GraphDirection.TryAddNewDirection(dir);
             Logger.ClearLog();
-            int MAX_DEPTH = 4, DIR_DEPTH = 9; //PB Timeline: 10*1, 16*1, 17*1, 18*1, 3*9, 4*9!
+            int MAX_DEPTH = 4, DIR_DEPTH = 10; //PB Timeline: 10*1, 16*1, 17*1, 18*1, 3*9, 4*9!
             Stopwatch sw = Stopwatch.StartNew();
 
 
@@ -574,7 +578,7 @@ namespace IDEAS
             List<GGRM_N_Subset> allRemainingSubsets = new List<GGRM_N_Subset>() { new(1, 0) };
             double previousPercentage = 0.0;
 
-            for (int i = 0; i < 1600; i++)
+            for (int i = 0; i < 10000; i++)
             {
                 Logger.Log("-----");
                 GGRM_N_Subset selectedSubset = allRemainingSubsets[0];
@@ -589,7 +593,7 @@ namespace IDEAS
                 foreach (GGRM_N_Subset tsubset in allRemainingSubsets)
                 {
                     totalPercentage += 1.0d / (double)tsubset.a;
-                    Logger.Log(tsubset);
+                    if (i % 1 == 0) Logger.Log(tsubset);
                 }
 
                 if (previousPercentage == totalPercentage)

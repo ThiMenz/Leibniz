@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using CUSTOM_LOGGING;
 using Microsoft.VisualBasic;
@@ -452,10 +453,12 @@ namespace IDEAS
     public class GGRM_N_Subset
     {
         public BigInteger a, b, mod; //mod is temp
+        public double sortingIndicator;
 
         public GGRM_N_Subset(BigInteger pA, BigInteger pB)
         {
             a = pA; b = pB;
+            sortingIndicator = (double)a + ((double)b / (double)a);
         }
 
         public GGRM_N_Subset(BigInteger pA, BigInteger pB, BigInteger pM)
@@ -535,10 +538,10 @@ namespace IDEAS
 
     public static class GGRM
     {
-        public static void CreateRootNode()
+        public static void CreateRootNode(GGRM_N_Subset singleSubset)
         {
             GGRM_GraphNode.root = new();
-            GGRM_GraphNode.root.subsetTuples = new List<GGRM_GraphNodeSubsetTuple>() { new GGRM_GraphNodeSubsetTuple(GGRM_GraphNode.root, new(1, 0)) };
+            GGRM_GraphNode.root.subsetTuples = new List<GGRM_GraphNodeSubsetTuple>() { new GGRM_GraphNodeSubsetTuple(GGRM_GraphNode.root, singleSubset) };
         }
 
         public static void ResetTreeStatics()
@@ -553,21 +556,14 @@ namespace IDEAS
 
         public static void Main(string[] args)
         {
-            /*GGRM_GraphDirection.allDirections.AddRange(new GGRM_GraphDirection[] {
-                new GGRM_GraphDirection(new(6, 4), new(3, 1), true),
-                new GGRM_GraphDirection(new(2, 0), new(2, 0), true),
-                new GGRM_GraphDirection(new(1, 0), new(2, 0), false),
-                new GGRM_GraphDirection(new(2, 1), new(3, 1), false),
-                });*/
-
             GGRM_GraphDirection[] BeginningArray = { new(new(6, 4), new(2, 1)), new(new(2, 0), new(1, 0)), new(new(1, 0), new(2, 0)), new(new(2, 1), new(6, 4)), };
             foreach (GGRM_GraphDirection dir in BeginningArray) GGRM_GraphDirection.TryAddNewDirection(dir);
             Logger.ClearLog();
-            const int MAX_DEPTH = 4, DIR_DEPTH = 9; //PB Timeline: 10*1, 16*1, 17*1, 18*1, 3*9, 4*9!
+            int MAX_DEPTH = 4, DIR_DEPTH = 9; //PB Timeline: 10*1, 16*1, 17*1, 18*1, 3*9, 4*9!
             Stopwatch sw = Stopwatch.StartNew();
 
 
-            CreateRootNode();
+            CreateRootNode(new(1, 0));
             ResetTreeStatics();
             FullRecursiveTreeGeneration(DIR_DEPTH, GGRM_GraphNode.root, true);
             foreach (GGRM_GraphDirection dir in allNewDirections) GGRM_GraphDirection.TryAddNewDirection(dir);
@@ -575,14 +571,222 @@ namespace IDEAS
 
             //return;
 
-            int iteration = 0, furthestDepth = 1;
-            cutoffFound = true;
-            while (cutoffFound)
+            List<GGRM_N_Subset> allRemainingSubsets = new List<GGRM_N_Subset>() { new(1, 0) };
+            double previousPercentage = 0.0;
+
+            for (int i = 0; i < 1600; i++)
             {
-                cutoffFound = false;
-                for (int i = furthestDepth; i <= MAX_DEPTH; i++) //i = furthest depth
+                Logger.Log("-----");
+                GGRM_N_Subset selectedSubset = allRemainingSubsets[0];
+                allRemainingSubsets.Remove(selectedSubset);
+                Logger.Log(selectedSubset + ": \n");
+                foreach (GGRM_N_Subset tsubset in ReduceSubset(selectedSubset, MAX_DEPTH))
                 {
-                    if (iteration == 0) CreateRootNode();
+                    BinaryInsertSubset(allRemainingSubsets, tsubset);
+                }
+                double totalPercentage = 0;
+                SubsetListCompression(allRemainingSubsets);
+                foreach (GGRM_N_Subset tsubset in allRemainingSubsets)
+                {
+                    totalPercentage += 1.0d / (double)tsubset.a;
+                    Logger.Log(tsubset);
+                }
+
+                if (previousPercentage == totalPercentage)
+                {
+                    Logger.Log("DEPTH INCREASE!");
+                    MAX_DEPTH++;
+                }
+
+
+                previousPercentage = totalPercentage;
+                Logger.Log($"TotalPercentage: " + totalPercentage);
+            }
+
+            sw.Stop();
+
+            Logger.Log($"Elapsed Time: {sw.ElapsedMilliseconds}ms");
+        }
+
+        public static void SubsetListCompression(List<GGRM_N_Subset> list)
+        {
+            bool changeThisIteration = true;
+            while (changeThisIteration) {
+                changeThisIteration = false;
+                foreach (GGRM_N_Subset subset in list)
+                {
+                    if (!subset.a.IsPowerOfTwo)
+                    {
+                        BigInteger a2 = subset.a / 3;
+                        BigInteger b2 = subset.b % a2; //b2, b2 + a2, b2 + 2*a2
+
+                        if (BinarySearchSubsets(list, subset.a, b2, b2 + a2, b2 + 2 * a2))
+                        {
+                            changeThisIteration = true;
+                            BinaryRemoveSubsets(list, subset.a, b2, b2 + a2, b2 + 2 * a2);
+                            BinaryInsertSubset(list, new(a2, b2));
+                            break;
+                        }
+                    }
+
+                    if (subset.a % 2 == 0)
+                    {
+                        BigInteger a2 = subset.a / 2;
+                        BigInteger b2 = subset.b % a2; //b2, b2 + a2
+
+                        if (BinarySearchSubsets(list, subset.a, b2, b2 + a2))
+                        {
+                            changeThisIteration = true;
+                            BinaryRemoveSubsets(list, subset.a, b2, b2 + a2);
+                            BinaryInsertSubset(list, new(a2, b2));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        private static void BinaryInsertSubset(List<GGRM_N_Subset> list, GGRM_N_Subset subset)
+        {
+            // If the list is empty, just add and return
+            if (list.Count == 0)
+            {
+                list.Add(subset);
+                return;
+            }
+
+            int low = 0;
+            int high = list.Count - 1;
+            double key = subset.sortingIndicator;
+
+            // binary search for the first element >= key
+            while (low <= high)
+            {
+                int mid = (low + high) / 2;
+                double midVal = list[mid].sortingIndicator;
+
+                if (midVal < key)
+                {
+                    // target is to the right
+                    low = mid + 1;
+                }
+                else
+                {
+                    // midVal >= key, so could be the insertion point
+                    high = mid - 1;
+                }
+            }
+
+            // 'low' is now the index of the first element >= key,
+            // or list.Count if all elements were < key.
+            list.Insert(low, subset);
+        }
+
+        private static bool BinaryRemoveSubsets(List<GGRM_N_Subset> list, BigInteger a, params BigInteger[] bArr)
+        {
+            double d = (double)a;
+            bool allRemoved = true;
+
+            foreach (BigInteger b in bArr)
+            {
+                double key = d + ((double)b / d);
+                if (!BinaryRemoveSubset(list, key))
+                {
+                    allRemoved = false;
+                }
+            }
+
+            return allRemoved;
+        }
+
+        /// <summary>
+        /// Binary‐searches for a subset with exactly this sortingIndicator,
+        /// removes it if found, and returns true. Otherwise returns false.
+        /// </summary>
+        private static bool BinaryRemoveSubset(List<GGRM_N_Subset> list, double key)
+        {
+            int low = 0;
+            int high = list.Count - 1;
+
+            while (low <= high)
+            {
+                int mid = (low + high) / 2;
+                double midVal = list[mid].sortingIndicator;
+
+                if (midVal == key)
+                {
+                    // found it → remove and return
+                    list.RemoveAt(mid);
+                    return true;
+                }
+                else if (midVal < key)
+                {
+                    low = mid + 1;
+                }
+                else
+                {
+                    high = mid - 1;
+                }
+            }
+
+            // not found
+            return false;
+        }
+
+        private static bool BinarySearchSubsets(List<GGRM_N_Subset> list, BigInteger a, params BigInteger[] bArr)
+        {
+            double d = (double)a;
+            foreach (BigInteger b in bArr)
+            {
+                if (!BinarySearchSubset(list, d + ((double)b / d)))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static bool BinarySearchSubset(List<GGRM_N_Subset> list, double key)
+        {
+            int low = 0;
+            int high = list.Count - 1;
+
+            while (low <= high)
+            {
+                int mid = (low + high) / 2;
+                double midVal = list[mid].sortingIndicator;
+
+                if (midVal == key)
+                {
+                    return true;
+                }
+                else if (midVal < key)
+                {
+                    low = mid + 1;
+                }
+                else
+                {
+                    high = mid - 1;
+                }
+            }
+
+            return false;
+        }
+
+
+        public static List<GGRM_N_Subset> ReduceSubset(GGRM_N_Subset subset, int maxDepth)
+        {
+            int furthestDepth = 1;
+            cutoffFound = false;
+            //cutoffFound = true;
+            //while (cutoffFound)
+            //{
+            //    cutoffFound = false;
+            //while (furthestDepth != maxDepth)
+            //{
+                for (int i = furthestDepth; i <= maxDepth; i++) //i = furthest depth
+                {
+                    CreateRootNode(subset);
                     GGRM_GraphNode beginNode = GGRM_GraphNode.root;
 
                     //if (i == furthestDepth) Logger.Log(beginNode);
@@ -598,9 +802,11 @@ namespace IDEAS
                     //foreach (GGRM_GraphDirection dir in allNewDirections) GGRM_GraphDirection.TryAddNewDirection(dir);
 
                     if (furthestDepth < i) furthestDepth = i;
-                    if (cutoffFound || MAX_DEPTH == furthestDepth)
+                    if (cutoffFound || maxDepth == furthestDepth)
                     {
-                        double totalPercentage = 0;
+                        //Console.
+
+                        /*double totalPercentage = 0;
                         foreach (GGRM_GraphNodeSubsetTuple subsetT in beginNode.subsetTuples) totalPercentage += (1.0d / (double)subsetT.originals.a);
                         //foreach (GGRM_N_Subset subset in cutoffPossibilities) Logger.Log(subset);
                         Logger.Log();
@@ -621,16 +827,16 @@ namespace IDEAS
 
                         Logger.Log();
                         Logger.Log();
-                        Logger.Log();
+                        Logger.Log();*/
 
                         break;
                     }
-                }
+                //}
             }
-
-            sw.Stop();
-
-            Logger.Log($"Elapsed Time: {sw.ElapsedMilliseconds}ms");
+            //}
+            List<GGRM_N_Subset> rSubsets = new();
+            foreach (GGRM_GraphNodeSubsetTuple tsubset in GGRM_GraphNode.root.subsetTuples) rSubsets.Add(tsubset.originals);
+            return rSubsets;
         }
 
 

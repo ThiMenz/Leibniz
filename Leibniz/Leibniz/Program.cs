@@ -1,6 +1,9 @@
 ﻿using System.Diagnostics;
 using System.Numerics;
 using System.Text;
+using System.Transactions;
+using System.Windows.Markup;
+using System.Xml.Linq;
 using CUSTOM_LOGGING;
 
 namespace IDEAS
@@ -145,13 +148,13 @@ namespace IDEAS
         public enum GraphDirection { pos3, pos2, neg2, neg3, none }
         public GGRM_GraphDirection previousGraphDir = GGRM_GraphDirection.None;
 
-        public void GenerateChildren()
+        public void GenerateChildren(bool ignoreBelow=true)
         {
             GraphDirection[] tDirList = { GraphDirection.neg3, GraphDirection.neg2, GraphDirection.pos2, GraphDirection.pos3 };
 
             foreach (GGRM_GraphNodeSubsetTuple subsetTuple in subsetTuples)
             {
-                if (subsetTuple.values.a < subsetTuple.originals.a) continue;
+                if (ignoreBelow && subsetTuple.values.a < subsetTuple.originals.a) continue;
                 foreach (GGRM_GraphDirection dir in GGRM_GraphDirection.allDirections)
                     if (!previousGraphDir.IsOpposite(dir)) AddChild(subsetTuple, dir);
             }
@@ -566,6 +569,21 @@ namespace IDEAS
             int MAX_DEPTH = 4, DIR_DEPTH = 10; //PB Timeline: 10*1, 16*1, 17*1, 18*1, 3*9, 4*9!
             Stopwatch sw = Stopwatch.StartNew();
 
+            ResetTreeStatics();
+            CreateRootNode(new(1, 0));
+            RecursiveDualExistance(12, GGRM_GraphNode.root, true);
+
+            Console.WriteLine("#####################");
+            foreach (GGRM_GraphNodeSubsetTuple tuple in beamCandidates) Logger.Log(tuple);
+            //Console.WriteLine(GGRM_GraphNode.root);
+
+            //ResetTreeStatics();
+            //CreateRootNode(new(2, 1));
+            //CreateRootNode(new(2, 1));
+            //RecursiveDualExistance(7, GGRM_GraphNode.root, true);
+
+
+            return;
 
             CreateRootNode(new(1, 0));
             ResetTreeStatics();
@@ -788,54 +806,54 @@ namespace IDEAS
             //    cutoffFound = false;
             //while (furthestDepth != maxDepth)
             //{
-                for (int i = furthestDepth; i <= maxDepth; i++) //i = furthest depth
+            for (int i = furthestDepth; i <= maxDepth; i++) //i = furthest depth
+            {
+                CreateRootNode(subset);
+                GGRM_GraphNode beginNode = GGRM_GraphNode.root;
+
+                //if (i == furthestDepth) Logger.Log(beginNode);
+                //foreach (GGRM_GraphNodeSubsetTuple subsetT in beginNode.subsetTuples) Logger.Log(subsetT.originals);
+                //Logger.Log("GRAPHING PROCESS STARTED\n");
+
+                ResetTreeStatics();
+                RecursiveTreeGeneration(i, beginNode, true);
+
+                foreach (GGRM_GraphNodeSubsetTuple rule in allNewRules) beginNode.ApplyNewRule(rule);
+                allNewRules.Clear();
+
+                //foreach (GGRM_GraphDirection dir in allNewDirections) GGRM_GraphDirection.TryAddNewDirection(dir);
+
+                if (furthestDepth < i) furthestDepth = i;
+                if (cutoffFound || maxDepth == furthestDepth)
                 {
-                    CreateRootNode(subset);
-                    GGRM_GraphNode beginNode = GGRM_GraphNode.root;
+                    //Console.
 
-                    //if (i == furthestDepth) Logger.Log(beginNode);
-                    //foreach (GGRM_GraphNodeSubsetTuple subsetT in beginNode.subsetTuples) Logger.Log(subsetT.originals);
-                    //Logger.Log("GRAPHING PROCESS STARTED\n");
+                    /*double totalPercentage = 0;
+                    foreach (GGRM_GraphNodeSubsetTuple subsetT in beginNode.subsetTuples) totalPercentage += (1.0d / (double)subsetT.originals.a);
+                    //foreach (GGRM_N_Subset subset in cutoffPossibilities) Logger.Log(subset);
+                    Logger.Log();
+                    Logger.Log($"{++iteration}. Iteration (depth = {furthestDepth}, " +
+                    $"uncertaintyThreshold = {GGRM_GraphNode.staticUncertaintyUntil}, " +
+                    $"rootSubsetCount = {beginNode.subsetTuples.Count}, " +
+                    $"nodeCount = {nodeCount}, " +
+                    $"transposCount = {transpositionCount}, " +
+                    $"subsetCount = {subsetCount}, " +
+                    $"modChecks = {GGRM_N_Subset.ModChecks}, " +
+                    $"dirCount = {GGRM_GraphDirection.allDirections.Count}, " +
+                    $"remainingNaturalsSize = {totalPercentage}):");
 
-                    ResetTreeStatics();
-                    RecursiveTreeGeneration(i, beginNode, true);
+                    //Logger.Log(beginNode);
+                    //GGRM_GraphDirection.PrintAllDirections();
 
-                    foreach (GGRM_GraphNodeSubsetTuple rule in allNewRules) beginNode.ApplyNewRule(rule);
-                    allNewRules.Clear();
+                    foreach (GGRM_GraphNodeSubsetTuple subsetT in beginNode.subsetTuples) Logger.Log(subsetT.originals);
 
-                    //foreach (GGRM_GraphDirection dir in allNewDirections) GGRM_GraphDirection.TryAddNewDirection(dir);
+                    Logger.Log();
+                    Logger.Log();
+                    Logger.Log();*/
 
-                    if (furthestDepth < i) furthestDepth = i;
-                    if (cutoffFound || maxDepth == furthestDepth)
-                    {
-                        //Console.
-
-                        /*double totalPercentage = 0;
-                        foreach (GGRM_GraphNodeSubsetTuple subsetT in beginNode.subsetTuples) totalPercentage += (1.0d / (double)subsetT.originals.a);
-                        //foreach (GGRM_N_Subset subset in cutoffPossibilities) Logger.Log(subset);
-                        Logger.Log();
-                        Logger.Log($"{++iteration}. Iteration (depth = {furthestDepth}, " +
-                        $"uncertaintyThreshold = {GGRM_GraphNode.staticUncertaintyUntil}, " +
-                        $"rootSubsetCount = {beginNode.subsetTuples.Count}, " +
-                        $"nodeCount = {nodeCount}, " +
-                        $"transposCount = {transpositionCount}, " +
-                        $"subsetCount = {subsetCount}, " +
-                        $"modChecks = {GGRM_N_Subset.ModChecks}, " +
-                        $"dirCount = {GGRM_GraphDirection.allDirections.Count}, " +
-                        $"remainingNaturalsSize = {totalPercentage}):");
-
-                        //Logger.Log(beginNode);
-                        //GGRM_GraphDirection.PrintAllDirections();
-
-                        foreach (GGRM_GraphNodeSubsetTuple subsetT in beginNode.subsetTuples) Logger.Log(subsetT.originals);
-
-                        Logger.Log();
-                        Logger.Log();
-                        Logger.Log();*/
-
-                        break;
-                    }
-                //}
+                    break;
+                }
+            //}
             }
             //}
             List<GGRM_N_Subset> rSubsets = new();
@@ -884,6 +902,104 @@ namespace IDEAS
             node.GenerateChildren();
             foreach (GGRM_GraphNode child in node.childNodes.Values)
                 FullRecursiveTreeGeneration(depth - 1, child, false);
+        }
+
+        private static Dictionary<(BigInteger, BigInteger), GGRM_GraphNode> dualExistanceDict = new();
+
+        private static List<GGRM_GraphNodeSubsetTuple> beamCandidates = new();
+
+        private static bool DoesBeamCandidateRepresentationExist(GGRM_GraphNodeSubsetTuple ptuple)
+        {
+            GGRM_GraphNodeSubsetTuple tuple = new(ptuple.nodeRef, ptuple.rootTupleRef, ptuple.originals, ptuple.values);
+            if (tuple.originals.b > tuple.values.b) (tuple.originals.b, tuple.values.b) = (tuple.values.b, tuple.originals.b);
+
+            foreach (GGRM_GraphNodeSubsetTuple iTuple in beamCandidates)
+            {
+                if (tuple.originals.a < iTuple.originals.a)
+                {
+                    BigInteger factor = iTuple.originals.a / tuple.originals.a;
+                    if (tuple.originals.b * factor == iTuple.originals.b && tuple.values.b * factor == iTuple.values.b)
+                    {
+                        Console.WriteLine("=D");
+                        beamCandidates.Remove(iTuple);
+                        break;
+                    }
+                }
+                else if (tuple.originals.a == iTuple.originals.a)
+                {
+                    if (
+                        (tuple.originals.b == iTuple.originals.b && tuple.values.b == iTuple.values.b) ||
+                        (tuple.originals.b == iTuple.values.b && tuple.values.b == iTuple.originals.b)
+                        ) return true;
+                }
+                else
+                {
+
+                    BigInteger factor = tuple.originals.a / iTuple.originals.a;
+                    Console.WriteLine($">>{tuple}|{iTuple}|{factor}");
+                    if (iTuple.originals.b * factor == tuple.originals.b && iTuple.values.b * factor == tuple.values.b)
+                    {
+                        Console.WriteLine(":D");
+                        return true;
+                    }
+                }
+            }
+            beamCandidates.Add(tuple);
+            return false;
+        }
+
+        private static void RecursiveDualExistance(int depth, GGRM_GraphNode node, bool isRoot) //Ohne Transpostable bisher
+        {
+            nodeCount++;
+
+            if (node == null) return;
+
+            if (!isRoot && node.subsetTuples[0].values.a == node.subsetTuples[0].originals.a && !DoesBeamCandidateRepresentationExist(node.subsetTuples[0]))
+            {
+                GGRM_GraphNode? curNode = node;
+                while (curNode != null)
+                {
+                    if (curNode.subsetTuples.Count == 1) Logger.Log(curNode.subsetTuples[0]);
+                    curNode = curNode.parent;
+                }
+                Logger.Log("!!!" + depth + "\n");
+            }
+
+            /*if (isSecond)
+            {
+                (BigInteger, BigInteger) bTuple = (node.subsetTuples[0].values.a, node.subsetTuples[0].values.b);
+                if (dualExistanceDict.ContainsKey(bTuple))
+                {
+                    Console.WriteLine(node.subsetTuples[0].originals + " <|> " + dualExistanceDict[bTuple].subsetTuples[0].originals);
+                    Console.WriteLine(node.subsetTuples[0].values + " <|> " + dualExistanceDict[bTuple].subsetTuples[0].values);
+                    GGRM_GraphNode curNode = node;
+                    while (curNode != null)
+                    {
+                        if (curNode.subsetTuples.Count == 1) Console.WriteLine(curNode.subsetTuples[0]);
+                        curNode = curNode.parent;
+                    } 
+                    Console.WriteLine();
+                    curNode = dualExistanceDict[bTuple];
+                    while (curNode != null)
+                    {
+                        if (curNode.subsetTuples.Count == 1) Console.WriteLine(curNode.subsetTuples[0]);
+                        curNode = curNode.parent;
+                    }
+                    Console.WriteLine();
+                    Console.WriteLine();
+                    Console.WriteLine();
+                }
+            }
+            else
+            {
+                dualExistanceDict.TryAdd((node.subsetTuples[0].values.a, node.subsetTuples[0].values.b), node);
+            }*/
+
+            if (depth == 0) return;
+
+            node.GenerateChildren(false);
+            foreach (GGRM_GraphNode child in node.childNodes.Values)
+                RecursiveDualExistance(depth - 1, child, false);
         }
     }
 }

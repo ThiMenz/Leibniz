@@ -51,10 +51,26 @@ namespace CUSTOM_LOGGING
         /// <summary>
         /// Writes the given message both to the console and to the log file.
         /// </summary>
-        public static void Log(object message)
+        public static void WriteLine(object message)
         {
+            if (message == null || message == "")
+            {
+                Write("\n");
+                return;
+            } 
+            else if (message == "\n")
+            {
+                Write("\n\n");
+                return;
+            }
             Console.WriteLine(message);
             GetWriter().WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} | {message}");
+        }
+
+        public static void Write(object message)
+        {
+            Console.Write(message);
+            GetWriter().Write($"{message}");
         }
 
         /// <summary>

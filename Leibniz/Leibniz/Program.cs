@@ -1,5 +1,8 @@
-﻿using System.Diagnostics;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Numerics;
+using System.Reflection.Metadata.Ecma335;
 using System.Text;
 using System.Transactions;
 using System.Windows.Markup;
@@ -242,7 +245,6 @@ namespace IDEAS
             return b;
         }
 
-
         public bool CheckForLowerCutoffs()
         {
             bool foundCutoff = false;
@@ -253,6 +255,8 @@ namespace IDEAS
                 while (subsetTuple.originals.b < 0) subsetTuple.originals.b += subsetTuple.originals.a;
                 double tmpDiff = (double)subsetTuple.originals.b - (double)tmpPrevB;
                 if (tmpDiff > staticUncertaintyUntil) staticUncertaintyUntil = tmpDiff;
+
+
 
                 if (subsetTuple.values.a < subsetTuple.originals.a)
                 {
@@ -541,6 +545,123 @@ namespace IDEAS
         #endregion
     }
 
+    public class BeamGraphNode
+    {
+        public static List<BeamGraphNode>[] beamGraphNodesGrouped = new List<BeamGraphNode>[0];
+        public static List<int>[] beamGraphNodesGroupedIDs = new List<int>[0];
+        public static long beamSectionLength = 0;
+
+        public static void InitBeamGraph(long length)
+        {
+            beamGraphNodesGrouped = new List<BeamGraphNode>[length * 2];
+            beamGraphNodesGroupedIDs = new List<int>[length * 2];
+            for (int i = 0; i < length * 2; i++)
+            {
+                beamGraphNodesGrouped[i] = new List<BeamGraphNode>();
+                beamGraphNodesGroupedIDs[i] = new List<int>();
+            }
+            beamSectionLength = length;
+        }
+
+        public static List<(List<int>, bool)> GetAllBeamGraphSubsets()
+        {
+            List<(List<int>, bool)> allSubsets = new();
+            bool[] visitedNodes = new bool[beamGraphNodesGrouped.Length];
+
+            bool lastIterationWasEmpty = false; //Not really used
+            while (!lastIterationWasEmpty)
+            {
+                List<int> idxs = GetBeamGraphSubset(visitedNodes);
+                if (idxs.Count == 0) break;
+                int count1 = 0, count2 = 0;
+                foreach (int idx in idxs)
+                {
+                    visitedNodes[idx] = true;
+                    if (idx < beamSectionLength) count1++;
+                    else count2++;
+                }
+                allSubsets.Add((idxs, count1 > 0 && count2 > 0));
+            }
+            return allSubsets;  
+        }
+
+        private static bool[] emptyMask = new bool[0];
+        public static List<int> GetBeamGraphSubset(bool[] startingPointMask)
+        {
+            int maxNodeCount = 0, beamGraphNodeIdx = -1;
+            for (int i = 0; i < beamGraphNodesGrouped.Length; i++) 
+                if (beamGraphNodesGrouped[i].Count > maxNodeCount && !startingPointMask[i]) 
+                    (maxNodeCount, beamGraphNodeIdx) = (beamGraphNodesGrouped[i].Count, i);
+
+            if (beamGraphNodeIdx == -1) return new();
+
+            List<int> frontiers = new() { beamGraphNodeIdx };
+            //foreach (BeamGraphNode bgn in beamGraphNodesGrouped[beamGraphNodeIdx]) frontiers.Add(bgn);
+
+            //Console.WriteLine(frontiers.Count + " | " + beamGraphNodeIdx);
+
+            bool[] visitedNodes = new bool[beamGraphNodesGrouped.Length];
+            visitedNodes[beamGraphNodeIdx] = true;
+
+            while (frontiers.Count != 0)
+            {
+                int[] tempFrontiers = frontiers.ToArray();
+                frontiers.Clear();
+                foreach (int bgnID in tempFrontiers)
+                {
+                    foreach (BeamGraphNode bgn in beamGraphNodesGrouped[bgnID])
+                    {
+                        //Console.WriteLine(bgn.b1 + "|" + bgn.b2);
+                        if (!visitedNodes[(int)bgn.b1])
+                        {
+                            visitedNodes[(int)bgn.b1] = true;
+                            frontiers.Add((int)bgn.b1);
+                        }
+                        if (!visitedNodes[(int)bgn.b2])
+                        {
+                            visitedNodes[(int)bgn.b2] = true;
+                            frontiers.Add((int)bgn.b2);
+                        }
+                    }
+                }
+            }
+
+            List<int> rList = new();
+            for (int i = 0; i < beamGraphNodesGrouped.Length; i++)
+            {
+                if (visitedNodes[i]) rList.Add(i);
+            }
+
+            return rList;
+        }
+
+        public BeamGraphNode(BigInteger pb1, BigInteger pb2)
+        {
+            if (pb1 > pb2) (pb1, pb2) = (pb2, pb1);
+
+            b1 = pb1;
+            b2 = pb2;
+
+            if (pb2 >= beamSectionLength && pb1 >= beamSectionLength) return;
+            else if (pb2 < beamSectionLength)
+            {
+                beamGraphNodesGrouped[(int)pb1].Add(this);
+                beamGraphNodesGrouped[(int)pb2].Add(this);
+                BeamGraphNode bgn = new BeamGraphNode(pb1 + beamSectionLength, pb2 + beamSectionLength);
+                beamGraphNodesGrouped[(int)pb1 + beamSectionLength].Add(bgn);
+                beamGraphNodesGrouped[(int)pb2 + beamSectionLength].Add(bgn);
+            }
+            else 
+            {
+                beamGraphNodesGrouped[(int)pb1].Add(this); 
+                beamGraphNodesGrouped[(int)pb2].Add(this); 
+            }
+        }
+
+        public BigInteger b1, b2;
+
+    }
+
     public static class GGRM
     {
         public static void CreateRootNode(GGRM_N_Subset singleSubset)
@@ -571,10 +692,64 @@ namespace IDEAS
 
             ResetTreeStatics();
             CreateRootNode(new(1, 0));
-            RecursiveDualExistance(12, GGRM_GraphNode.root, true);
+            RecursiveDualExistance(18, GGRM_GraphNode.root, true);
+
+            BigInteger maxA = 0;
+            foreach (GGRM_GraphNodeSubsetTuple tuple in beamCandidates)
+            {
+                if (tuple.originals.a > maxA) maxA = tuple.originals.a;
+                Logger.Log(tuple);
+
+                GGRM_GraphDirection.TryAddNewDirection(new(tuple.originals, new(1, 0)));
+                GGRM_GraphDirection.TryAddNewDirection(new(tuple.values, new(1, 0)));
+            }
+
+            GGRM_GraphDirection.PrintAllDirections();
 
             Console.WriteLine("#####################");
-            foreach (GGRM_GraphNodeSubsetTuple tuple in beamCandidates) Logger.Log(tuple);
+
+            /**************************
+
+            BeamGraphNode.InitBeamGraph((long)maxA);
+
+            Console.WriteLine("#####################");
+            int tCount = 0;
+            foreach (GGRM_GraphNodeSubsetTuple tuple in beamCandidates)
+            {
+                BigInteger oA = tuple.originals.a, factor = maxA / oA, tB1 = tuple.originals.b, tB2 = tuple.values.b;
+                for (BigInteger i = 0; i < factor; i++)
+                {
+                    tCount++;
+                    //CreateGraphNodes(tB1, tB2);
+                    _ = new BeamGraphNode(tB1, tB2);
+                    Logger.Log(new GGRM_GraphNodeSubsetTuple(tuple.nodeRef, tuple.rootTupleRef, new(maxA, tB1), new(maxA, tB2)));
+                    tB1 += oA; tB2 += oA;
+                }
+            }
+            Console.WriteLine(tCount);
+
+            Console.WriteLine("#####################");
+
+            /*foreach (int i in BeamGraphNode.GetMissingBeamGraphValues()) Console.Write($"{i} ,");
+            Console.WriteLine();
+            foreach (int i in BeamGraphNode.GetMissingBeamGraphValues()) 
+                if (BeamGraphNode.beamGraphNodesGrouped[i].Count != 0) 
+                    Console.Write($"{i} ,");
+
+            Console.WriteLine();
+            Console.WriteLine(BeamGraphNode.GetMissingBeamGraphValues().Count);*/
+
+            /*
+            foreach ((List<int>, bool) subset in BeamGraphNode.GetAllBeamGraphSubsets())
+            {
+                Console.Write($"ContinousBeam = {subset.Item2}: ");
+                foreach (int idx in subset.Item1)
+                {
+                    Console.Write($"{idx},");
+                }
+                Console.WriteLine("\n\n");
+            }
+
             //Console.WriteLine(GGRM_GraphNode.root);
 
             //ResetTreeStatics();
@@ -583,22 +758,29 @@ namespace IDEAS
             //RecursiveDualExistance(7, GGRM_GraphNode.root, true);
 
 
-            return;
+            ****************************/
 
             CreateRootNode(new(1, 0));
             ResetTreeStatics();
-            FullRecursiveTreeGeneration(DIR_DEPTH, GGRM_GraphNode.root, true);
-            foreach (GGRM_GraphDirection dir in allNewDirections) GGRM_GraphDirection.TryAddNewDirection(dir);
-            GGRM_GraphDirection.PrintAllDirections();
+            //FullRecursiveTreeGeneration(DIR_DEPTH, GGRM_GraphNode.root, true);
+            //foreach (GGRM_GraphDirection dir in allNewDirections) GGRM_GraphDirection.TryAddNewDirection(dir);
+            //GGRM_GraphDirection.PrintAllDirections();
 
             //return;
 
+            CreateRootNode(new(1, 0));
+            ResetTreeStatics();
             List<GGRM_N_Subset> allRemainingSubsets = new List<GGRM_N_Subset>() { new(1, 0) };
             double previousPercentage = 0.0;
 
-            for (int i = 0; i < 10000; i++)
+            for (int i = 0; i < 200; i++)
             {
                 Logger.Log("-----");
+                if (allRemainingSubsets.Count == 0)
+                {
+                    Logger.Log("================================\n\nIf no programming mistake was made, Collatz Conjecture is proven!\n\n================================");
+                    break;
+                }
                 GGRM_N_Subset selectedSubset = allRemainingSubsets[0];
                 allRemainingSubsets.Remove(selectedSubset);
                 Logger.Log(selectedSubset + ": \n");
@@ -611,7 +793,7 @@ namespace IDEAS
                 foreach (GGRM_N_Subset tsubset in allRemainingSubsets)
                 {
                     totalPercentage += 1.0d / (double)tsubset.a;
-                    if (i % 1 == 0) Logger.Log(tsubset);
+                    //Logger.Log(tsubset);
                 }
 
                 if (previousPercentage == totalPercentage)
@@ -628,6 +810,24 @@ namespace IDEAS
             sw.Stop();
 
             Logger.Log($"Elapsed Time: {sw.ElapsedMilliseconds}ms");
+        }
+
+        public static void CreateGraphNodes(BigInteger pB1, BigInteger pB2)
+        {
+            _ = new BeamGraphNode(pB1, pB2);
+            BigInteger t1 = pB1, t2 = pB2;
+            while (t1 % 2 == 0 && t2 % 2 == 0) {
+                t1 /= 2;
+                t2 /= 2; 
+                _ = new BeamGraphNode(t1, t2);
+            }
+            t1 = pB1; t2 = pB2;
+            while (t1 < BeamGraphNode.beamSectionLength && t2 < BeamGraphNode.beamSectionLength)
+            {
+                t1 *= 2;
+                t2 *= 2;
+                _ = new BeamGraphNode(t1, t2);
+            }
         }
 
         public static void SubsetListCompression(List<GGRM_N_Subset> list)
@@ -920,7 +1120,7 @@ namespace IDEAS
                     BigInteger factor = iTuple.originals.a / tuple.originals.a;
                     if (tuple.originals.b * factor == iTuple.originals.b && tuple.values.b * factor == iTuple.values.b)
                     {
-                        Console.WriteLine("=D");
+                        //Console.WriteLine("=D");
                         beamCandidates.Remove(iTuple);
                         break;
                     }
@@ -936,10 +1136,10 @@ namespace IDEAS
                 {
 
                     BigInteger factor = tuple.originals.a / iTuple.originals.a;
-                    Console.WriteLine($">>{tuple}|{iTuple}|{factor}");
+                    //Console.WriteLine($">>{tuple}|{iTuple}|{factor}");
                     if (iTuple.originals.b * factor == tuple.originals.b && iTuple.values.b * factor == tuple.values.b)
                     {
-                        Console.WriteLine(":D");
+                        //Console.WriteLine(":D");
                         return true;
                     }
                 }
@@ -956,13 +1156,13 @@ namespace IDEAS
 
             if (!isRoot && node.subsetTuples[0].values.a == node.subsetTuples[0].originals.a && !DoesBeamCandidateRepresentationExist(node.subsetTuples[0]))
             {
-                GGRM_GraphNode? curNode = node;
-                while (curNode != null)
-                {
-                    if (curNode.subsetTuples.Count == 1) Logger.Log(curNode.subsetTuples[0]);
-                    curNode = curNode.parent;
-                }
-                Logger.Log("!!!" + depth + "\n");
+                //GGRM_GraphNode? curNode = node;
+                //while (curNode != null)
+                //{
+                //    if (curNode.subsetTuples.Count == 1) Logger.Log(curNode.subsetTuples[0]);
+                //    curNode = curNode.parent;
+                //}
+                //Logger.Log("!!!" + depth + "\n");
             }
 
             /*if (isSecond)

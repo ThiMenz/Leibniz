@@ -3,3 +3,4 @@
 ## Later, with the basis of the existing tools, it also discovered a continous linear "beam" - proving that >55% of all natural numbers eventually reach 1.
 ## Combining both, it becomes clear that there can't be a pivot of a counterexample and therefore the conjecture should be proven :)
 ## Not 100%'tely sure if there isn't a flaw in the logic / code - I'll have to verify & clean up the code first.
+## There was a flaw in the code ;)
